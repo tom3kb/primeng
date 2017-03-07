@@ -36,8 +36,8 @@ export const AUTOCOMPLETE_VALUE_ACCESSOR: any = {
             <div class="ui-autocomplete-panel ui-widget-content ui-corner-all ui-shadow" [style.display]="panelVisible ? 'block' : 'none'" [style.width]="appendTo ? 'auto' : '100%'" [style.max-height]="scrollHeight">
                 <ul class="ui-autocomplete-items ui-autocomplete-list ui-widget-content ui-widget ui-corner-all ui-helper-reset">
                     <li *ngFor="let option of suggestions" [ngClass]="{'ui-autocomplete-list-item ui-corner-all':true,'ui-state-highlight':(highlightOption==option)}"
-                        (mouseenter)="highlightOption=option" (mouseleave)="highlightOption=null" (click)="selectItem(option)">
-                        <span *ngIf="!itemTemplate">{{field ? option[field] : option}}</span>
+                        (mouseenter)="onMouseEnterOnItem($event,option)" (mouseleave)="onMouseLeaveFromItem($event,option)" (click)="selectItem(option)">
+                        <span *ngIf="!itemTemplate&&!isHeader(option)">{{field ? option[field] : option}}</span>
                         <template *ngIf="itemTemplate" [pTemplateWrapper]="itemTemplate" [item]="option"></template>
                     </li>
                 </ul>
@@ -78,6 +78,8 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
 
     @Input() appendTo: any;
 
+    @Input() checkOptionIsHeader: (any) => boolean;
+
     @Output() completeMethod: EventEmitter<any> = new EventEmitter();
     
     @Output() onSelect: EventEmitter<any> = new EventEmitter();
@@ -99,7 +101,9 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
     @Input() tabindex: number;
     
     @ContentChildren(PrimeTemplate) templates: QueryList<any>;
-    
+
+    public headerTemplate: TemplateRef<any>;
+
     public itemTemplate: TemplateRef<any>;
     
     public selectedItemTemplate: TemplateRef<any>;
@@ -165,7 +169,11 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
                 case 'selectedItem':
                     this.selectedItemTemplate = item.template;
                 break;
-                
+
+                case 'header':
+                    this.headerTemplate = item.template;
+                    break;
+
                 default:
                     this.itemTemplate = item.template;
                 break;
@@ -265,22 +273,23 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
     }
             
     selectItem(option: any) {
-        if(this.multiple) {
-            this.input.value = '';
-            this.value = this.value||[];
-            if(!this.isSelected(option)) {
-                this.value.push(option);
+        if (!this.isHeader(option)) {
+            if (this.multiple) {
+                this.input.value = '';
+                this.value = this.value || [];
+                if (!this.isSelected(option)) {
+                    this.value.push(option);
+                    this.onModelChange(this.value);
+                }
+            }
+            else {
+                this.input.value = this.field ? this.objectUtils.resolveFieldData(option, this.field) : option;
+                this.value = option;
                 this.onModelChange(this.value);
             }
+
+            this.onSelect.emit(option);
         }
-        else {
-            this.input.value = this.field ? this.objectUtils.resolveFieldData(option, this.field): option;
-            this.value = option;
-            this.onModelChange(this.value);
-        }
-        
-        this.onSelect.emit(option);
-        
         this.input.focus();
     }
     
@@ -316,7 +325,37 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
         this.onUnselect.emit(removedValue);
         this.onModelChange(this.value);
     }
-        
+
+    getNextHighlightItemIndex(index) {
+        var retIndex = index;
+
+        do {
+            index++;
+            if (!this.isHeader(this.suggestions[index])
+            ) {
+                retIndex = index;
+                break;
+            }
+        } while (index <= this.suggestions.length - 1);
+
+        return retIndex;
+    }
+
+    getPrevHighlightItemIndex(index) {
+        var retIndex = index;
+
+        do {
+            index--;
+            if (index >= 0 && !this.isHeader(this.suggestions[index])
+            ) {
+                retIndex = index;
+                break;
+            }
+        } while (index > 0);
+
+        return retIndex;
+    }
+
     onKeydown(event) {
         if(this.panelVisible) {
             let highlightItemIndex = this.findOptionIndex(this.highlightOption);
@@ -325,14 +364,17 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
                 //down
                 case 40:
                     if(highlightItemIndex != -1) {
-                        var nextItemIndex = highlightItemIndex + 1;
+                        let nextItemIndex = this.getNextHighlightItemIndex(highlightItemIndex);
                         if(nextItemIndex != (this.suggestions.length)) {
                             this.highlightOption = this.suggestions[nextItemIndex];
                             this.highlightOptionChanged = true;
                         }
                     }
                     else {
-                        this.highlightOption = this.suggestions[0];
+                        let nextItemIndex = this.getNextHighlightItemIndex(-1);
+                        if (nextItemIndex > -1) {
+                            this.highlightOption = this.suggestions[nextItemIndex];
+                        }
                     }
                     
                     event.preventDefault();
@@ -341,7 +383,7 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
                 //up
                 case 38:
                     if(highlightItemIndex > 0) {
-                        let prevItemIndex = highlightItemIndex - 1;
+                        let prevItemIndex = this.getPrevHighlightItemIndex(highlightItemIndex);
                         this.highlightOption = this.suggestions[prevItemIndex];
                         this.highlightOptionChanged = true;
                     }
@@ -411,6 +453,26 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
     onDropdownBlur() {
         this.dropdownFocus = false;
     }
+
+    onMouseEnterOnItem(event: MouseEvent, option: any) {
+        if (event.movementX != 0 || event.movementY != 0) {
+            if (!this.isHeader(option)) {
+                this.highlightOption = option
+            }
+            else {
+                this.highlightOption = null;
+            }
+        }
+    }
+
+    onMouseLeaveFromItem(event: MouseEvent, option) {
+        if (event.movementX != 0 || event.movementY != 0) {
+            if (!this.isHeader(option)) {
+                this.highlightOption = null;
+            }
+        }
+    }
+
     
     isSelected(val: any): boolean {
         let selected: boolean = false;
@@ -424,7 +486,15 @@ export class AutoComplete implements AfterViewInit,DoCheck,AfterViewChecked,Cont
         }
         return selected;
     }
-    
+
+    isHeader(option: any) {
+        let isHeader = false;
+        if (this.checkOptionIsHeader && option) {
+            isHeader = this.checkOptionIsHeader(option);
+        }
+        return isHeader;
+    }
+
     findOptionIndex(option): number {        
         let index: number = -1;
         if(this.suggestions) {
